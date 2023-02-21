@@ -43,7 +43,6 @@ auto AggregationExecutor::Next(Tuple *tuple, RID *rid) -> bool {
   if (aht_iterator_ == aht_.End()) {
     if (has_no_value_ && plan_->GetGroupBys().empty()) {
       std::vector<Value> values(aht_.GenerateInitialAggregateValue().aggregates_);
-
       *tuple = Tuple(values, &plan_->OutputSchema());
       *rid = (*tuple).GetRid();
       has_no_value_ = false;

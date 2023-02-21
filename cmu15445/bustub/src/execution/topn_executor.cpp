@@ -10,7 +10,7 @@ TopNExecutor::TopNExecutor(ExecutorContext *exec_ctx, const TopNPlanNode *plan,
 
 void TopNExecutor::Init() {
   cnt_ = plan_->n_;
-  auto I = [this](const Tuple &t1, const Tuple &t2) -> bool {
+  auto i = [this](const Tuple &t1, const Tuple &t2) -> bool {
     for (auto [type, expr] : plan_->GetOrderBy()) {
       Value v1 = expr->Evaluate(&t1, child_executor_->GetOutputSchema());
       Value v2 = expr->Evaluate(&t2, child_executor_->GetOutputSchema());
@@ -34,7 +34,7 @@ void TopNExecutor::Init() {
     // TO DO check
     return true;
   };
-  std::priority_queue<Tuple, std::vector<Tuple>, decltype(I)> q(I);
+  std::priority_queue<Tuple, std::vector<Tuple>, decltype(i)> q(i);
 
   Tuple tuple;
   RID rid;
