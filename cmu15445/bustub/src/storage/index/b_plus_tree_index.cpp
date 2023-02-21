@@ -26,7 +26,6 @@ void BPLUSTREE_INDEX_TYPE::InsertEntry(const Tuple &key, RID rid, Transaction *t
   // construct insert index key
   KeyType index_key;
   index_key.SetFromKey(key);
-
   container_.Insert(index_key, rid, transaction);
 }
 
@@ -35,7 +34,6 @@ void BPLUSTREE_INDEX_TYPE::DeleteEntry(const Tuple &key, RID rid, Transaction *t
   // construct delete index key
   KeyType index_key;
   index_key.SetFromKey(key);
-
   container_.Remove(index_key, transaction);
 }
 

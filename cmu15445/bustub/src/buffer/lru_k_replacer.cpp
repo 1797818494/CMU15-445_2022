@@ -24,7 +24,7 @@ auto LRUKReplacer::Evict(frame_id_t *frame_id) -> bool {
   int tim = INT32_MAX;
   for (auto val = q_.rbegin(); val != q_.rend(); val++) {
     if (mp_[*val].flag_ && mp_[*val].GetFront() < tim) {
-      flag = true;
+      // flag = true;
       *frame_id = *val;
       q_.erase(mp_[*frame_id].pos_);
       mp_.erase(*frame_id);

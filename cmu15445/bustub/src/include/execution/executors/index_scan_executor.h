@@ -14,6 +14,7 @@
 
 #include <vector>
 
+#include "common/logger.h"
 #include "common/rid.h"
 #include "execution/executor_context.h"
 #include "execution/executors/abstract_executor.h"
@@ -44,5 +45,9 @@ class IndexScanExecutor : public AbstractExecutor {
  private:
   /** The index scan plan node to be executed. */
   const IndexScanPlanNode *plan_;
+  // my add
+  BPlusTreeIndexForOneIntegerColumn *tree_;
+  IndexIterator<IntegerKeyType, IntegerValueType, IntegerComparatorType> begin_;
+  IndexIterator<IntegerKeyType, IntegerValueType, IntegerComparatorType> end_;
 };
 }  // namespace bustub
