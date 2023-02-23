@@ -297,6 +297,19 @@ class LockManager {
    */
   auto RunCycleDetection() -> void;
 
+  // my add 
+  auto GetLRQueuePtr(table_oid_t id) -> std::shared_ptr<LockRequestQueue>;
+  
+  auto LockPushQueue(txn_id_t txn_id, LockMode lock_mode, table_oid_t oid) -> bool;
+  auto UpdateLock(Transaction *txn, LockMode lock_mode, table_oid_t oid) -> bool;
+  auto IsCompatible(LockMode lock_mode1, LockMode lock_mode) -> bool;
+  auto GrantLock(Transaction *txn, LockMode lock_mode, table_oid_t oid) -> bool;
+  auto GrantCompatible(LockMode lm1, LockMode lm2) -> bool;
+  auto GetTxnMode(Transaction* txn, table_oid_t oid) -> LockMode;
+  void BookKeeping(Transaction* txn, LockMode mode, table_oid_t oid, bool is_table = true);
+  void TxnAbortAll(Transaction* txn);
+  void UnLockChangeState(Transaction* txn, LockMode mode);
+  void BookKeepingRemove(Transaction* txn, LockMode mode, table_oid_t oid, bool is_table = true);
  private:
   /** Fall 2022 */
   /** Structure that holds lock requests for a given table oid */
