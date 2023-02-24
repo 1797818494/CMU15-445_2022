@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "common/config.h"
+#include "common/logger.h"
 #include "common/rid.h"
 #include "concurrency/transaction.h"
 
@@ -297,19 +298,26 @@ class LockManager {
    */
   auto RunCycleDetection() -> void;
 
-  // my add 
+  // my add
   auto GetLRQueuePtr(table_oid_t id) -> std::shared_ptr<LockRequestQueue>;
-  
+
   auto LockPushQueue(txn_id_t txn_id, LockMode lock_mode, table_oid_t oid) -> bool;
   auto UpdateLock(Transaction *txn, LockMode lock_mode, table_oid_t oid) -> bool;
   auto IsCompatible(LockMode lock_mode1, LockMode lock_mode) -> bool;
   auto GrantLock(Transaction *txn, LockMode lock_mode, table_oid_t oid) -> bool;
   auto GrantCompatible(LockMode lm1, LockMode lm2) -> bool;
-  auto GetTxnMode(Transaction* txn, table_oid_t oid) -> LockMode;
-  void BookKeeping(Transaction* txn, LockMode mode, table_oid_t oid, bool is_table = true);
-  void TxnAbortAll(Transaction* txn);
-  void UnLockChangeState(Transaction* txn, LockMode mode);
-  void BookKeepingRemove(Transaction* txn, LockMode mode, table_oid_t oid, bool is_table = true);
+  auto GetTxnMode(Transaction *txn, table_oid_t oid) -> LockMode;
+  void BookKeeping(Transaction *txn, LockMode mode, table_oid_t oid);
+  void TxnAbortAll(Transaction *txn);
+  void UnLockChangeState(Transaction *txn, LockMode mode);
+  void BookKeepingRemove(Transaction *txn, LockMode mode, table_oid_t oid);
+  auto GetLRQueuePtr(table_oid_t id, RID rid) -> std::shared_ptr<LockRequestQueue>;
+  auto UpdateLock(Transaction *txn, LockMode lock_mode, table_oid_t oid, RID rid) -> bool;
+  auto GetTxnMode(Transaction *txn, table_oid_t oid, RID rid) -> LockMode;
+  void BookKeeping(Transaction *txn, LockMode mode, table_oid_t oid, RID rid);
+  void BookKeepingRemove(Transaction *txn, LockMode mode, table_oid_t oid, RID rid);
+  auto GrantLock(Transaction *txn, LockMode lock_mode, table_oid_t oid, RID rid) -> bool;
+
  private:
   /** Fall 2022 */
   /** Structure that holds lock requests for a given table oid */
