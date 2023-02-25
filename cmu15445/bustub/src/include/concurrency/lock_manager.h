@@ -17,6 +17,7 @@
 #include <list>
 #include <memory>
 #include <mutex>  // NOLINT
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -65,7 +66,7 @@ class LockManager {
   class LockRequestQueue {
    public:
     /** List of lock requests for the same resource (table or row) */
-    std::list<LockRequest *> request_queue_;
+    std::list<std::shared_ptr<LockRequest>> request_queue_;
     /** For notifying blocked transactions on this rid */
     std::condition_variable cv_;
     /** txn_id of an upgrading transaction (if any) */
@@ -317,6 +318,51 @@ class LockManager {
   void BookKeeping(Transaction *txn, LockMode mode, table_oid_t oid, RID rid);
   void BookKeepingRemove(Transaction *txn, LockMode mode, table_oid_t oid, RID rid);
   auto GrantLock(Transaction *txn, LockMode lock_mode, table_oid_t oid, RID rid) -> bool;
+  void IsTableFit(Transaction *txn, LockMode lock_mode, table_oid_t oid);
+  void Log(Transaction *txn, LockMode lock_mode, table_oid_t oid) {
+    std::string s;
+    if (lock_mode == LockMode::EXCLUSIVE) {
+      s = "X";
+    }
+    if (lock_mode == LockMode::SHARED) {
+      s = "S";
+    }
+    if (lock_mode == LockMode::SHARED_INTENTION_EXCLUSIVE) {
+      s = "SIX";
+    }
+    if (lock_mode == LockMode::INTENTION_SHARED) {
+      s = "IS";
+    }
+    if (lock_mode == LockMode::INTENTION_EXCLUSIVE) {
+      s = "IX";
+    }
+    std::string io;
+    if (txn->GetIsolationLevel() == IsolationLevel::READ_COMMITTED) {
+      io = "RC";
+    }
+    if (txn->GetIsolationLevel() == IsolationLevel::READ_UNCOMMITTED) {
+      io = "RU";
+    }
+    if (txn->GetIsolationLevel() == IsolationLevel::REPEATABLE_READ) {
+      io = "PR";
+    }
+    std::string state;
+    if (txn->GetState() == TransactionState::ABORTED) {
+      state = "ABORTED";
+    }
+    if (txn->GetState() == TransactionState::COMMITTED) {
+      state = "COMMITTED";
+    }
+    if (txn->GetState() == TransactionState::GROWING) {
+      state = "GROWING";
+    }
+    if (txn->GetState() == TransactionState::SHRINKING) {
+      state = "SHRINKING";
+    }
+
+    LOG_INFO("txn is %d  %s %s %s table id is %d", (int)txn->GetTransactionId(), s.c_str(), io.c_str(), state.c_str(),
+             (int)oid);
+  }
 
  private:
   /** Fall 2022 */
