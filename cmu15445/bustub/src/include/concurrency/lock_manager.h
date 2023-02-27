@@ -17,6 +17,8 @@
 #include <list>
 #include <memory>
 #include <mutex>  // NOLINT
+#include <set>
+#include <stack>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -363,6 +365,8 @@ class LockManager {
     LOG_INFO("txn is %d  %s %s %s table id is %d", (int)txn->GetTransactionId(), s.c_str(), io.c_str(), state.c_str(),
              (int)oid);
   }
+  auto Dfs(txn_id_t txn, std::unordered_map<txn_id_t, int> &mp, std::stack<txn_id_t> &stk,
+           std::unordered_map<txn_id_t, int> &ump) -> bool;
 
  private:
   /** Fall 2022 */
@@ -379,8 +383,9 @@ class LockManager {
   std::atomic<bool> enable_cycle_detection_;
   std::thread *cycle_detection_thread_;
   /** Waits-for graph representation. */
-  std::unordered_map<txn_id_t, std::vector<txn_id_t>> waits_for_;
+  std::unordered_map<txn_id_t, std::set<txn_id_t>> waits_for_;
   std::mutex waits_for_latch_;
+  std::unordered_map<txn_id_t, int> mp_;
 };
 
 }  // namespace bustub
