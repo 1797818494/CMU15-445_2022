@@ -20,33 +20,9 @@
 #include "concurrency/transaction_manager.h"
 
 namespace bustub {
-class ManageTxn{
-  public:
-    ManageTxn(Transaction* txn) : my_txn_(txn), flag_(true) {
-       my_txn_->LockTxn();
-    }
-    void Lock() {
-      flag_ = true;
-      my_txn_->LockTxn();
-    }
-    void UnLock() {
-      flag_ = false;
-      my_txn_->LockTxn();
-    }
-    ~ManageTxn() {
-      if(flag_) {
-        my_txn_->UnlockTxn();
-      }
-    }
-  private:
-    Transaction* my_txn_;
-    bool flag_;
-
-};
 
 auto LockManager::LockTable(Transaction *txn, LockMode lock_mode, const table_oid_t &oid) -> bool {
   LOG_INFO("lock table");
-  ManageTxn lock_manage(txn);
   Log(txn, lock_mode, oid);
   auto queue_ptr = GetLRQueuePtr(oid);
   if (txn->GetState() == TransactionState::COMMITTED || txn->GetState() == TransactionState::ABORTED) {
@@ -78,9 +54,7 @@ auto LockManager::LockTable(Transaction *txn, LockMode lock_mode, const table_oi
         }
         std::unique_lock<std::mutex> lock(queue_ptr->latch_);
         while (!GrantLock(txn, lock_mode, oid)) {
-          lock_manage.UnLock();
           queue_ptr->cv_.wait(lock);
-          lock_manage.Lock();
           if (txn->GetState() == TransactionState::ABORTED) {
             LOG_INFO("granting abort!!!");
             auto &q = queue_ptr->request_queue_;
@@ -106,7 +80,6 @@ auto LockManager::LockTable(Transaction *txn, LockMode lock_mode, const table_oi
       return false;
     }
   }
-
   if (txn->GetState() == TransactionState::GROWING) {
     LOG_INFO("growing");
     if (txn->GetIsolationLevel() == IsolationLevel::READ_UNCOMMITTED) {
@@ -152,7 +125,6 @@ auto LockManager::LockTable(Transaction *txn, LockMode lock_mode, const table_oi
 auto LockManager::UnlockTable(Transaction *txn, const table_oid_t &oid) -> bool {
   // to do check row lock
   // to check
-  ManageTxn lock_manage(txn);
   LOG_INFO("unlock table");
   Log(txn, LockMode::EXCLUSIVE, oid);
   if ((*txn->GetExclusiveRowLockSet())[oid].size() > 0 || (*txn->GetSharedRowLockSet())[oid].size() > 0) {
@@ -180,11 +152,9 @@ auto LockManager::UnlockTable(Transaction *txn, const table_oid_t &oid) -> bool 
   return false;
 }
 void LockManager::IsTableFit(Transaction *txn, LockMode lock_mode, table_oid_t oid) {
-  ManageTxn lock_manage(txn);
   if (lock_mode == LockMode::EXCLUSIVE) {
     if (!(txn->IsTableExclusiveLocked(oid) || txn->IsTableIntentionExclusiveLocked(oid) ||
           txn->IsTableSharedIntentionExclusiveLocked(oid))) {
-      LOG_INFO("table fit abort");
       TxnAbortAll(txn);
       throw TransactionAbortException(txn->GetTransactionId(), AbortReason::TABLE_LOCK_NOT_PRESENT);
     }
@@ -194,19 +164,16 @@ void LockManager::IsTableFit(Transaction *txn, LockMode lock_mode, table_oid_t o
     if (!(txn->IsTableSharedLocked(oid) || txn->IsTableIntentionSharedLocked(oid) ||
           txn->IsTableSharedIntentionExclusiveLocked(oid) || txn->IsTableExclusiveLocked(oid) ||
           txn->IsTableIntentionExclusiveLocked(oid) || txn->IsTableSharedIntentionExclusiveLocked(oid))) {
-      LOG_INFO("table fit abort");
       TxnAbortAll(txn);
       throw TransactionAbortException(txn->GetTransactionId(), AbortReason::TABLE_LOCK_NOT_PRESENT);
     }
     return;
   }
-  LOG_INFO("table fit abort");
   TxnAbortAll(txn);
   throw TransactionAbortException(txn->GetTransactionId(), AbortReason::ATTEMPTED_INTENTION_LOCK_ON_ROW);
 }
 auto LockManager::LockRow(Transaction *txn, LockMode lock_mode, const table_oid_t &oid, const RID &rid) -> bool {
   LOG_INFO("lock row");
-  ManageTxn lock_manage(txn);
   // judge the table
   Log(txn, lock_mode, oid);
   IsTableFit(txn, lock_mode, oid);
@@ -240,9 +207,7 @@ auto LockManager::LockRow(Transaction *txn, LockMode lock_mode, const table_oid_
         }
         std::unique_lock<std::mutex> lock(queue_ptr->latch_);
         while (!GrantLock(txn, lock_mode, oid, rid)) {
-          lock_manage.UnLock();
           queue_ptr->cv_.wait(lock);
-          lock_manage.Lock();
           if (txn->GetState() == TransactionState::ABORTED) {
             LOG_INFO("granting abort!!!");
             auto &q = queue_ptr->request_queue_;
@@ -310,7 +275,6 @@ auto LockManager::LockRow(Transaction *txn, LockMode lock_mode, const table_oid_
 
 auto LockManager::UnlockRow(Transaction *txn, const table_oid_t &oid, const RID &rid) -> bool {
   LOG_INFO("unlock row");
-  ManageTxn lock_manage(txn);
   Log(txn, LockMode::EXCLUSIVE, oid);
   // to do !!!!!!!!!!!!!!!!!!!!!!!!
   auto queue_ptr = GetLRQueuePtr(oid, rid);
@@ -517,7 +481,6 @@ void LockManager::RunCycleDetection() {
               iter++;
             }
           }
-          LOG_INFO("notify all !!!!");
           quest_lock->cv_.notify_all();
         }
         // table_lock_map_latch_.unlock();
@@ -534,7 +497,6 @@ void LockManager::RunCycleDetection() {
               iter++;
             }
           }
-          LOG_INFO("notify all !!!!");
           quest_lock->cv_.notify_all();
         }
         txn->LockTxn();
@@ -553,18 +515,6 @@ void LockManager::RunCycleDetection() {
         txn->GetExclusiveRowLockSet()->clear();
         txn->UnlockTxn();
       }
-      LOG_INFO("all notify");
-      table_lock_map_latch_.lock();
-      for (const auto &table_pairs : table_lock_map_) {
-        table_pairs.second->cv_.notify_all();
-      }
-      table_lock_map_latch_.unlock();
-
-      row_lock_map_latch_.lock();
-      for (const auto &row_pairs : row_lock_map_) {
-        row_pairs.second->cv_.notify_all();
-      }
-      row_lock_map_latch_.unlock();
       waits_for_.clear();
       mp_.clear();
     }
