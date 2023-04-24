@@ -23,7 +23,19 @@ InsertExecutor::InsertExecutor(ExecutorContext *exec_ctx, const InsertPlanNode *
       child_executor_(std::forward<std::unique_ptr<AbstractExecutor>>(child_executor)),
       has_no_tuple_(false) {}
 
-void InsertExecutor::Init() { child_executor_->Init(); }
+void InsertExecutor::Init() {
+  auto lock_manager = exec_ctx_->GetLockManager();
+  auto txn = exec_ctx_->GetTransaction();
+  printf("%d init insert %d", txn->GetTransactionId(), plan_->table_oid_);
+  try {
+    if (!lock_manager->LockTable(txn, LockManager::LockMode::INTENTION_EXCLUSIVE, plan_->table_oid_)) {
+      throw ExecutionException("insert lock table");
+    }
+  } catch (TransactionAbortException &e) {
+    throw ExecutionException("insert lock table");
+  }
+  child_executor_->Init();
+}
 
 auto InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
   Tuple insert_tuple;
@@ -32,14 +44,25 @@ auto InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
   if (has_no_tuple_) {
     return false;
   }
+  auto lock_manager = exec_ctx_->GetLockManager();
+  auto txn = exec_ctx_->GetTransaction();
   while (child_executor_->Next(&insert_tuple, &insert_rid)) {
     TableInfo *table_info = exec_ctx_->GetCatalog()->GetTable(plan_->TableOid());
     if (table_info->table_->InsertTuple(insert_tuple, &insert_rid, exec_ctx_->GetTransaction())) {
+      try {
+        if (!lock_manager->LockRow(txn, LockManager::LockMode::EXCLUSIVE, plan_->table_oid_, insert_rid)) {
+          throw ExecutionException("insert lock row");
+        }
+      } catch (TransactionAbortException &e) {
+        throw ExecutionException("insert lock row");
+      }
       cnt++;
       auto vec = exec_ctx_->GetCatalog()->GetTableIndexes(table_info->name_);
       for (auto info : vec) {
         auto key = insert_tuple.KeyFromTuple(table_info->schema_, info->key_schema_, info->index_->GetKeyAttrs());
         info->index_->InsertEntry(key, insert_rid, exec_ctx_->GetTransaction());
+        txn->AppendIndexWriteRecord(IndexWriteRecord(insert_rid, plan_->table_oid_, WType::INSERT, insert_tuple,
+                                                     info->index_oid_, exec_ctx_->GetCatalog()));
       }
     } else {
       LOG_INFO("insert fail");

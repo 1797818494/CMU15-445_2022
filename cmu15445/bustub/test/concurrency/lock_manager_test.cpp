@@ -1,225 +1,258 @@
-/**
- * deadlock_detection_test.cpp
- */
+#include "concurrency/lock_manager.h"
 
-#include <atomic>
+#include <chrono>  // NOLINT
 #include <random>
 #include <thread>  // NOLINT
 
+#include "common/bustub_instance.h"
 #include "common/config.h"
-#include "concurrency/lock_manager.h"
+#include "concurrency/transaction.h"
 #include "concurrency/transaction_manager.h"
+#include "fmt/core.h"
 #include "gtest/gtest.h"
-#define TEST_TIMEOUT_BEGIN                           \
-  std::promise<bool> promisedFinished;               \
-  auto futureResult = promisedFinished.get_future(); \
-                              std::thread([](std::promise<bool>& finished) {
-#define TEST_TIMEOUT_FAIL_END(X)                                                                  \
-  finished.set_value(true);                                                                       \
-  }, std::ref(promisedFinished)).detach();                                                        \
-  EXPECT_TRUE(futureResult.wait_for(std::chrono::milliseconds(X)) != std::future_status::timeout) \
-      << "Test Failed Due to Time Out";
 
 namespace bustub {
-TEST(LockManagerDeadlockDetectionTest, DISABLED_EdgeTest) {
-  LockManager lock_mgr{};
 
-  const int num_nodes = 100;
-  const int num_edges = num_nodes / 2;
-  const int seed = 15445;
-  std::srand(seed);
+/*
+ * This test is only a sanity check. Please do not rely on this test
+ * to check the correctness.
+ */
 
-  // Create txn ids and shuffle
-  std::vector<txn_id_t> txn_ids;
-  txn_ids.reserve(num_nodes);
-  for (int i = 0; i < num_nodes; i++) {
-    txn_ids.push_back(i);
-  }
-  EXPECT_EQ(num_nodes, txn_ids.size());
-  auto rng = std::default_random_engine{};
-  std::shuffle(txn_ids.begin(), txn_ids.end(), rng);
-  EXPECT_EQ(num_nodes, txn_ids.size());
+// --- Helper functions ---
+void CheckGrowing(Transaction *txn) { EXPECT_EQ(txn->GetState(), TransactionState::GROWING); }
 
-  // Create edges by pairing adjacent txn_ids
-  std::vector<std::pair<txn_id_t, txn_id_t>> edges;
-  for (int i = 0; i < num_nodes; i += 2) {
-    EXPECT_EQ(i / 2, lock_mgr.GetEdgeList().size());
-    auto t1 = txn_ids[i];
-    auto t2 = txn_ids[i + 1];
-    lock_mgr.AddEdge(t1, t2);
-    edges.emplace_back(t1, t2);
-    EXPECT_EQ((i / 2) + 1, lock_mgr.GetEdgeList().size());
-  }
+void CheckShrinking(Transaction *txn) { EXPECT_EQ(txn->GetState(), TransactionState::SHRINKING); }
 
-  auto lock_mgr_edges = lock_mgr.GetEdgeList();
-  EXPECT_EQ(num_edges, lock_mgr_edges.size());
-  EXPECT_EQ(num_edges, edges.size());
+void CheckAborted(Transaction *txn) { EXPECT_EQ(txn->GetState(), TransactionState::ABORTED); }
 
-  std::sort(lock_mgr_edges.begin(), lock_mgr_edges.end());
-  std::sort(edges.begin(), edges.end());
+void CheckCommitted(Transaction *txn) { EXPECT_EQ(txn->GetState(), TransactionState::COMMITTED); }
 
-  for (int i = 0; i < num_edges; i++) {
-    EXPECT_EQ(edges[i], lock_mgr_edges[i]);
-  }
+void CheckTxnRowLockSize(Transaction *txn, table_oid_t oid, size_t shared_size, size_t exclusive_size) {
+  EXPECT_EQ((*(txn->GetSharedRowLockSet()))[oid].size(), shared_size);
+  EXPECT_EQ((*(txn->GetExclusiveRowLockSet()))[oid].size(), exclusive_size);
 }
 
-TEST(LockManagerDeadlockDetectionTest, BasicDeadlockDetectionTest) {
+int GetTxnTableLockSize(Transaction *txn, LockManager::LockMode lock_mode) {
+  switch (lock_mode) {
+    case LockManager::LockMode::SHARED:
+      return txn->GetSharedTableLockSet()->size();
+    case LockManager::LockMode::EXCLUSIVE:
+      return txn->GetExclusiveTableLockSet()->size();
+    case LockManager::LockMode::INTENTION_SHARED:
+      return txn->GetIntentionSharedTableLockSet()->size();
+    case LockManager::LockMode::INTENTION_EXCLUSIVE:
+      return txn->GetIntentionExclusiveTableLockSet()->size();
+    case LockManager::LockMode::SHARED_INTENTION_EXCLUSIVE:
+      return txn->GetSharedIntentionExclusiveTableLockSet()->size();
+  }
+
+  return -1;
+}
+
+void CheckTableLockSizes(Transaction *txn, size_t s_size, size_t x_size, size_t is_size, size_t ix_size,
+                         size_t six_size) {
+  EXPECT_EQ(s_size, txn->GetSharedTableLockSet()->size());
+  EXPECT_EQ(x_size, txn->GetExclusiveTableLockSet()->size());
+  EXPECT_EQ(is_size, txn->GetIntentionSharedTableLockSet()->size());
+  EXPECT_EQ(ix_size, txn->GetIntentionExclusiveTableLockSet()->size());
+  EXPECT_EQ(six_size, txn->GetSharedIntentionExclusiveTableLockSet()->size());
+}
+
+TEST(LockManagerTest, RepeatableRead) {
+  const int num = 5;
+
   LockManager lock_mgr{};
   TransactionManager txn_mgr{&lock_mgr};
+  // table_oid_t oid = 0;
 
-  table_oid_t toid{0};
-  RID rid0{0, 0};
-  RID rid1{1, 1};
-  auto *txn0 = txn_mgr.Begin();
-  auto *txn1 = txn_mgr.Begin();
-  EXPECT_EQ(0, txn0->GetTransactionId());
-  EXPECT_EQ(1, txn1->GetTransactionId());
+  std::stringstream result;
+  auto bustub = std::make_unique<bustub::BustubInstance>();
+  auto writer = bustub::SimpleStreamWriter(result, true, " ");
 
-  std::thread t0([&] {
-    // Lock and sleep
-    bool res = lock_mgr.LockTable(txn0, LockManager::LockMode::INTENTION_EXCLUSIVE, toid);
-    EXPECT_EQ(true, res);
-    res = lock_mgr.LockRow(txn0, LockManager::LockMode::EXCLUSIVE, toid, rid0);
-    EXPECT_EQ(true, res);
-    EXPECT_EQ(TransactionState::GROWING, txn1->GetState());
+  auto schema = "CREATE TABLE nft(id int, terrier int);";
+  std::cerr << "x: create schema" << std::endl;
+  bustub->ExecuteSql(schema, writer);
+  fmt::print("{}", result.str());
+
+  std::cerr << "x: initialize data" << std::endl;
+  std::string query = "INSERT INTO nft VALUES ";
+  for (size_t i = 0; i < num; i++) {
+    query += fmt::format("({}, {})", i, 0);
+    if (i != num - 1) {
+      query += ", ";
+    } else {
+      query += ";";
+    }
+  }
+
+  {
+    std::stringstream ss;
+    auto writer = bustub::SimpleStreamWriter(ss, true);
+    auto txn = bustub->txn_manager_->Begin(nullptr, bustub::IsolationLevel::REPEATABLE_READ);
+    bustub->ExecuteSqlTxn(query, writer, txn);
+    CheckGrowing(txn);
+    bustub->txn_manager_->Commit(txn);
+    delete txn;
+    if (ss.str() != fmt::format("{}\t\n", num)) {
+      fmt::print("unexpected result \"{}\" when insert\n", ss.str());
+      exit(1);
+    }
+  }
+
+  {
+    std::string query = "SELECT * FROM nft;";
+    std::stringstream ss;
+    auto writer = bustub::SimpleStreamWriter(ss, true);
+    auto txn = bustub->txn_manager_->Begin(nullptr, bustub::IsolationLevel::REPEATABLE_READ);
+    bustub->ExecuteSqlTxn(query, writer, txn);
+    CheckGrowing(txn);
+    bustub->txn_manager_->Commit(txn);
+    delete txn;
+    fmt::print("--- YOUR RESULT ---\n{}\n", ss.str());
+  }
+
+  std::thread t0([&]() {
+    std::string query = "select * from nft where id = 0";
+    std::stringstream ss;
+    auto writer = bustub::SimpleStreamWriter(ss, true);
+    auto txn = bustub->txn_manager_->Begin(nullptr, bustub::IsolationLevel::REPEATABLE_READ);
+    fmt::print("txn thread t0 {}\n", query);
+    bustub->ExecuteSqlTxn(query, writer, txn);
+    fmt::print("thread t0 result\n{}\n", ss.str());
+    std::string s1 = ss.str();
+
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    ss.str("");
 
-    // This will block
-    res = lock_mgr.LockRow(txn0, LockManager::LockMode::EXCLUSIVE, toid, rid1);
-    EXPECT_EQ(true, res);
+    fmt::print("txn thread t0 {}\n", query);
+    bustub->ExecuteSqlTxn(query, writer, txn);
+    fmt::print("txn thread t0 result\n{}\n", ss.str());
+    std::string s2 = ss.str();
 
-    lock_mgr.UnlockRow(txn0, toid, rid1);
-    lock_mgr.UnlockRow(txn0, toid, rid0);
-    lock_mgr.UnlockTable(txn0, toid);
-
-    txn_mgr.Commit(txn0);
-    EXPECT_EQ(TransactionState::COMMITTED, txn0->GetState());
+    EXPECT_EQ(s1, s2);
+    CheckGrowing(txn);
+    bustub->txn_manager_->Commit(txn);
+    fmt::print("txn threadt0 commit\n");
+    delete txn;
   });
 
-  std::thread t1([&] {
-    // Sleep so T0 can take necessary locks
+  std::thread t1([&]() {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    bool res = lock_mgr.LockTable(txn1, LockManager::LockMode::INTENTION_EXCLUSIVE, toid);
-    EXPECT_EQ(res, true);
+    std::string query = "update nft set terrier = 1 where id = 0";
+    std::stringstream ss;
+    auto writer = bustub::SimpleStreamWriter(ss, true);
+    auto txn = bustub->txn_manager_->Begin(nullptr, bustub::IsolationLevel::REPEATABLE_READ);
 
-    res = lock_mgr.LockRow(txn1, LockManager::LockMode::EXCLUSIVE, toid, rid1);
-    EXPECT_EQ(TransactionState::GROWING, txn1->GetState());
+    fmt::print("txn thread t1 {}\n", query);
+    bustub->ExecuteSqlTxn(query, writer, txn);
+    fmt::print("txn thread t1 result\n{}\n", ss.str());
 
-    // This will block
-    res = lock_mgr.LockRow(txn1, LockManager::LockMode::EXCLUSIVE, toid, rid0);
-    EXPECT_EQ(res, false);
-
-    EXPECT_EQ(TransactionState::ABORTED, txn1->GetState());
-    txn_mgr.Abort(txn1);
+    CheckGrowing(txn);
+    bustub->txn_manager_->Commit(txn);
+    fmt::print("txn thread t1 commit\n");
+    delete txn;
   });
-
-  // Sleep for enough time to break cycle
-  std::this_thread::sleep_for(cycle_detection_interval * 2);
 
   t0.join();
   t1.join();
-
-  delete txn0;
-  delete txn1;
 }
 
-TEST(LockManagerDeadlockDetectionTest, BasicDeadlockDetectionTest1) {
+TEST(LockManagerTest, Readcommited) {
+  const int num = 5;
+
   LockManager lock_mgr{};
   TransactionManager txn_mgr{&lock_mgr};
+  // table_oid_t oid = 0;
 
-  table_oid_t toid{0};
-  RID rid0{0, 0};
-  RID rid1{1, 1};
-  RID rid2{2, 2};
-  auto *txn0 = txn_mgr.Begin();
-  auto *txn1 = txn_mgr.Begin();
-  auto *txn2 = txn_mgr.Begin();
-  EXPECT_EQ(0, txn0->GetTransactionId());
-  EXPECT_EQ(1, txn1->GetTransactionId());
-  EXPECT_EQ(2, txn2->GetTransactionId());
+  std::stringstream result;
+  auto bustub = std::make_unique<bustub::BustubInstance>();
+  auto writer = bustub::SimpleStreamWriter(result, true, " ");
 
-  std::thread t0([&] {
-    // Lock and sleep
-    bool res = lock_mgr.LockTable(txn0, LockManager::LockMode::INTENTION_EXCLUSIVE, toid);
-    EXPECT_EQ(true, res);
-    res = lock_mgr.LockRow(txn0, LockManager::LockMode::EXCLUSIVE, toid, rid0);
-    EXPECT_EQ(true, res);
-    EXPECT_EQ(TransactionState::GROWING, txn1->GetState());
+  auto schema = "CREATE TABLE nft(id int, terrier int);";
+  std::cerr << "x: create schema" << std::endl;
+  bustub->ExecuteSql(schema, writer);
+  fmt::print("{}", result.str());
+
+  std::cerr << "x: initialize data" << std::endl;
+  std::string query = "INSERT INTO nft VALUES ";
+  for (size_t i = 0; i < num; i++) {
+    query += fmt::format("({}, {})", i, 0);
+    if (i != num - 1) {
+      query += ", ";
+    } else {
+      query += ";";
+    }
+  }
+
+  {
+    std::stringstream ss;
+    auto writer = bustub::SimpleStreamWriter(ss, true);
+    auto txn = bustub->txn_manager_->Begin(nullptr, bustub::IsolationLevel::REPEATABLE_READ);
+    bustub->ExecuteSqlTxn(query, writer, txn);
+    CheckGrowing(txn);
+    bustub->txn_manager_->Commit(txn);
+    delete txn;
+    if (ss.str() != fmt::format("{}\t\n", num)) {
+      fmt::print("unexpected result \"{}\" when insert\n", ss.str());
+      exit(1);
+    }
+  }
+
+  {
+    std::string query = "SELECT * FROM nft;";
+    std::stringstream ss;
+    auto writer = bustub::SimpleStreamWriter(ss, true);
+    auto txn = bustub->txn_manager_->Begin(nullptr, bustub::IsolationLevel::REPEATABLE_READ);
+    bustub->ExecuteSqlTxn(query, writer, txn);
+    CheckGrowing(txn);
+    bustub->txn_manager_->Commit(txn);
+    delete txn;
+    fmt::print("--- YOUR RESULT ---\n{}\n", ss.str());
+  }
+
+  std::thread t0([&]() {
+    std::string query = "select * from nft";
+    std::stringstream ss;
+    auto writer = bustub::SimpleStreamWriter(ss, true);
+
+    auto txn = bustub->txn_manager_->Begin(nullptr, bustub::IsolationLevel::READ_COMMITTED);
+    fmt::print("thread t0 {}\n", query);
+    bustub->ExecuteSqlTxn(query, writer, txn);
+    fmt::print("thread t0 result 0 \n{}\n", ss.str());
+    std::string s1 = ss.str();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // This will block
-    res = lock_mgr.LockRow(txn0, LockManager::LockMode::EXCLUSIVE, toid, rid1);
-    EXPECT_EQ(true, res);
+    ss.str("");  // 清空流， clear是清空标志位
+    fmt::print("txn {}\n", query);
+    bustub->ExecuteSqlTxn(query, writer, txn);
+    fmt::print("thread t0 result 1 \n{}\n", ss.str());
+    std::string s2 = ss.str();
 
-    lock_mgr.UnlockRow(txn0, toid, rid1);
-    lock_mgr.UnlockRow(txn0, toid, rid0);
-    lock_mgr.UnlockTable(txn0, toid);
-
-    txn_mgr.Commit(txn0);
-    EXPECT_EQ(TransactionState::COMMITTED, txn0->GetState());
+    EXPECT_NE(s1, s2);
+    CheckGrowing(txn);
+    bustub->txn_manager_->Commit(txn);
+    fmt::print("txn thread t0 commit\n");
+    delete txn;
   });
 
-  std::thread t1([&] {
-    // Sleep so T0 can take necessary locks
-    bool res = lock_mgr.LockTable(txn1, LockManager::LockMode::INTENTION_EXCLUSIVE, toid);
-    EXPECT_EQ(res, true);
-
-    res = lock_mgr.LockRow(txn1, LockManager::LockMode::EXCLUSIVE, toid, rid1);
-    EXPECT_EQ(TransactionState::GROWING, txn1->GetState());
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    // This will block
-    res = lock_mgr.LockRow(txn1, LockManager::LockMode::EXCLUSIVE, toid, rid2);
-    EXPECT_EQ(res, true);
-
-    lock_mgr.UnlockRow(txn1, toid, rid2);
-    lock_mgr.UnlockRow(txn1, toid, rid1);
-    lock_mgr.UnlockTable(txn1, toid);
-
-    txn_mgr.Commit(txn1);
-    EXPECT_EQ(TransactionState::COMMITTED, txn1->GetState());
-  });
-
-  std::thread t2([&] {
+  std::thread t1([&]() {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    bool res = lock_mgr.LockTable(txn2, LockManager::LockMode::INTENTION_EXCLUSIVE, toid);
-    EXPECT_EQ(res, true);
-    res = lock_mgr.LockRow(txn2, LockManager::LockMode::EXCLUSIVE, toid, rid2);
-    EXPECT_EQ(TransactionState::GROWING, txn2->GetState());
+    std::string query = "update nft set terrier = 1 where id = 0";
+    std::stringstream ss;
+    auto writer = bustub::SimpleStreamWriter(ss, true);
+    auto txn = bustub->txn_manager_->Begin(nullptr, bustub::IsolationLevel::REPEATABLE_READ);
 
-    // This will block
-    res = lock_mgr.LockRow(txn2, LockManager::LockMode::EXCLUSIVE, toid, rid0);
-    EXPECT_EQ(res, false);
+    fmt::print("txn thread t1 {}\n", query);
+    bustub->ExecuteSqlTxn(query, writer, txn);
+    fmt::print("txn thread t1 result\n{}", ss.str());
 
-    EXPECT_EQ(TransactionState::ABORTED, txn2->GetState());
-    txn_mgr.Abort(txn2);
+    CheckGrowing(txn);
+    bustub->txn_manager_->Commit(txn);
+    fmt::print("txn thread t1 commit\n");
+    delete txn;
   });
-
-  // Sleep for enough time to break cycle
-  std::this_thread::sleep_for(cycle_detection_interval * 2);
 
   t0.join();
   t1.join();
-  t2.join();
-  delete txn0;
-  delete txn1;
-  delete txn2;
 }
-
-TEST(LockManagerDeadlockDetectionTest, CycleTest1) {
-  LockManager lock_mgr{};
-  lock_mgr.AddEdge(0, 1);
-  lock_mgr.AddEdge(1, 0);
-  lock_mgr.AddEdge(2, 3);
-  lock_mgr.AddEdge(3, 4);
-  lock_mgr.AddEdge(4, 2);
-  txn_id_t txn_id;
-  lock_mgr.HasCycle(&txn_id);
-  EXPECT_EQ(1, txn_id);
-  lock_mgr.RemoveEdge(1, 0);
-  lock_mgr.HasCycle(&txn_id);
-  EXPECT_EQ(4, txn_id);
-  lock_mgr.RemoveEdge(4, 2);
-}
-
 }  // namespace bustub

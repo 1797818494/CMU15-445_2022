@@ -23,6 +23,7 @@
 namespace bustub {
 TEST(LockManagerDeadlockDetectionTest, EdgeTest) {
   LockManager lock_mgr{};
+
   const int num_nodes = 100;
   const int num_edges = num_nodes / 2;
   const int seed = 15445;
@@ -48,25 +49,21 @@ TEST(LockManagerDeadlockDetectionTest, EdgeTest) {
     lock_mgr.AddEdge(t1, t2);
     edges.emplace_back(t1, t2);
     EXPECT_EQ((i / 2) + 1, lock_mgr.GetEdgeList().size());
-    printf("%d\n", i);
   }
-  printf("here !!!\n");
 
   auto lock_mgr_edges = lock_mgr.GetEdgeList();
   EXPECT_EQ(num_edges, lock_mgr_edges.size());
   EXPECT_EQ(num_edges, edges.size());
-  printf("here !!!!\n");
+
   std::sort(lock_mgr_edges.begin(), lock_mgr_edges.end());
   std::sort(edges.begin(), edges.end());
-  printf("here !!!!@\n");
+
   for (int i = 0; i < num_edges; i++) {
     EXPECT_EQ(edges[i], lock_mgr_edges[i]);
   }
-  printf("here !!!!@@\n");
 }
 
 TEST(LockManagerDeadlockDetectionTest, BasicDeadlockDetectionTest) {
-  printf("here!!!!!!!!");
   LockManager lock_mgr{};
   TransactionManager txn_mgr{&lock_mgr};
 
@@ -88,17 +85,15 @@ TEST(LockManagerDeadlockDetectionTest, BasicDeadlockDetectionTest) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // This will block
-    printf("here6");
     res = lock_mgr.LockRow(txn0, LockManager::LockMode::EXCLUSIVE, toid, rid1);
     EXPECT_EQ(true, res);
-    printf("here7");
+
     lock_mgr.UnlockRow(txn0, toid, rid1);
     lock_mgr.UnlockRow(txn0, toid, rid0);
     lock_mgr.UnlockTable(txn0, toid);
-    printf("here2");
+
     txn_mgr.Commit(txn0);
     EXPECT_EQ(TransactionState::COMMITTED, txn0->GetState());
-    printf("here1");
   });
 
   std::thread t1([&] {
@@ -109,14 +104,13 @@ TEST(LockManagerDeadlockDetectionTest, BasicDeadlockDetectionTest) {
 
     res = lock_mgr.LockRow(txn1, LockManager::LockMode::EXCLUSIVE, toid, rid1);
     EXPECT_EQ(TransactionState::GROWING, txn1->GetState());
-    printf("here4");
+
     // This will block
     res = lock_mgr.LockRow(txn1, LockManager::LockMode::EXCLUSIVE, toid, rid0);
     EXPECT_EQ(res, false);
-    printf("here5");
+
     EXPECT_EQ(TransactionState::ABORTED, txn1->GetState());
     txn_mgr.Abort(txn1);
-    printf("here3");
   });
 
   // Sleep for enough time to break cycle

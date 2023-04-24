@@ -1,4 +1,4 @@
-//===----------------------------------------------------------------------===//
+///===----------------------------------------------------------------------===//
 //
 //                         BusTub
 //
@@ -18,15 +18,12 @@
 #include <memory>
 #include <mutex>  // NOLINT
 #include <set>
-#include <stack>
-#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "common/config.h"
-#include "common/logger.h"
 #include "common/rid.h"
 #include "concurrency/transaction.h"
 
@@ -52,7 +49,6 @@ class LockManager {
         : txn_id_(txn_id), lock_mode_(lock_mode), oid_(oid) {}
     LockRequest(txn_id_t txn_id, LockMode lock_mode, table_oid_t oid, RID rid) /** Row lock request */
         : txn_id_(txn_id), lock_mode_(lock_mode), oid_(oid), rid_(rid) {}
-
     /** Txn_id of the txn requesting the lock */
     txn_id_t txn_id_;
     /** Locking mode of the requested lock */
@@ -67,14 +63,24 @@ class LockManager {
 
   class LockRequestQueue {
    public:
+    LockRequestQueue() = default;
+    ~LockRequestQueue() {
+      for (auto iter = request_queue_.begin(); iter != request_queue_.end();) {
+        auto i = *iter;
+        request_queue_.erase(iter++);
+        delete i;
+      }
+    }
     /** List of lock requests for the same resource (table or row) */
-    std::list<std::shared_ptr<LockRequest>> request_queue_;
+    std::list<LockRequest *> request_queue_;
     /** For notifying blocked transactions on this rid */
     std::condition_variable cv_;
     /** txn_id of an upgrading transaction (if any) */
     txn_id_t upgrading_ = INVALID_TXN_ID;
     /** coordination */
     std::mutex latch_;
+    auto GrantLockForTable(Transaction *txn, LockMode lock_mode) -> bool;
+    auto GrantLockForRow(Transaction *txn, LockMode lock_mode) -> bool;
   };
 
   /**
@@ -301,72 +307,7 @@ class LockManager {
    */
   auto RunCycleDetection() -> void;
 
-  // my add
-  auto GetLRQueuePtr(table_oid_t id) -> std::shared_ptr<LockRequestQueue>;
-
-  auto LockPushQueue(txn_id_t txn_id, LockMode lock_mode, table_oid_t oid) -> bool;
-  auto UpdateLock(Transaction *txn, LockMode lock_mode, table_oid_t oid) -> bool;
-  auto IsCompatible(LockMode lock_mode1, LockMode lock_mode) -> bool;
-  auto GrantLock(Transaction *txn, LockMode lock_mode, table_oid_t oid) -> bool;
-  auto GrantCompatible(LockMode lm1, LockMode lm2) -> bool;
-  auto GetTxnMode(Transaction *txn, table_oid_t oid) -> LockMode;
-  void BookKeeping(Transaction *txn, LockMode mode, table_oid_t oid);
-  void TxnAbortAll(Transaction *txn);
-  void UnLockChangeState(Transaction *txn, LockMode mode);
-  void BookKeepingRemove(Transaction *txn, LockMode mode, table_oid_t oid);
-  auto GetLRQueuePtr(table_oid_t id, RID rid) -> std::shared_ptr<LockRequestQueue>;
-  auto UpdateLock(Transaction *txn, LockMode lock_mode, table_oid_t oid, RID rid) -> bool;
-  auto GetTxnMode(Transaction *txn, table_oid_t oid, RID rid) -> LockMode;
-  void BookKeeping(Transaction *txn, LockMode mode, table_oid_t oid, RID rid);
-  void BookKeepingRemove(Transaction *txn, LockMode mode, table_oid_t oid, RID rid);
-  auto GrantLock(Transaction *txn, LockMode lock_mode, table_oid_t oid, RID rid) -> bool;
-  void IsTableFit(Transaction *txn, LockMode lock_mode, table_oid_t oid);
-  void Log(Transaction *txn, LockMode lock_mode, table_oid_t oid) {
-    std::string s;
-    if (lock_mode == LockMode::EXCLUSIVE) {
-      s = "X";
-    }
-    if (lock_mode == LockMode::SHARED) {
-      s = "S";
-    }
-    if (lock_mode == LockMode::SHARED_INTENTION_EXCLUSIVE) {
-      s = "SIX";
-    }
-    if (lock_mode == LockMode::INTENTION_SHARED) {
-      s = "IS";
-    }
-    if (lock_mode == LockMode::INTENTION_EXCLUSIVE) {
-      s = "IX";
-    }
-    std::string io;
-    if (txn->GetIsolationLevel() == IsolationLevel::READ_COMMITTED) {
-      io = "RC";
-    }
-    if (txn->GetIsolationLevel() == IsolationLevel::READ_UNCOMMITTED) {
-      io = "RU";
-    }
-    if (txn->GetIsolationLevel() == IsolationLevel::REPEATABLE_READ) {
-      io = "PR";
-    }
-    std::string state;
-    if (txn->GetState() == TransactionState::ABORTED) {
-      state = "ABORTED";
-    }
-    if (txn->GetState() == TransactionState::COMMITTED) {
-      state = "COMMITTED";
-    }
-    if (txn->GetState() == TransactionState::GROWING) {
-      state = "GROWING";
-    }
-    if (txn->GetState() == TransactionState::SHRINKING) {
-      state = "SHRINKING";
-    }
-
-    LOG_INFO("txn is %d  %s %s %s table id is %d", (int)txn->GetTransactionId(), s.c_str(), io.c_str(), state.c_str(),
-             (int)oid);
-  }
-  auto Dfs(txn_id_t txn, std::unordered_map<txn_id_t, int> &mp, std::stack<txn_id_t> &stk,
-           std::unordered_map<txn_id_t, int> &ump) -> bool;
+  auto DFS(std::vector<txn_id_t> cycle_vector, bool &is_cycle, txn_id_t *txn_id) -> void;
 
  private:
   /** Fall 2022 */
@@ -385,7 +326,6 @@ class LockManager {
   /** Waits-for graph representation. */
   std::unordered_map<txn_id_t, std::set<txn_id_t>> waits_for_;
   std::mutex waits_for_latch_;
-  std::unordered_map<txn_id_t, int> mp_;
 };
 
 }  // namespace bustub
