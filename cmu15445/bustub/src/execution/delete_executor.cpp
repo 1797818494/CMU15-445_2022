@@ -26,7 +26,7 @@ DeleteExecutor::DeleteExecutor(ExecutorContext *exec_ctx, const DeletePlanNode *
 void DeleteExecutor::Init() {
   auto lock_manager = exec_ctx_->GetLockManager();
   auto txn = exec_ctx_->GetTransaction();
-  printf("%d init delete %d", txn->GetTransactionId(), plan_->table_oid_);
+  printf("%d init delete %d  \n", txn->GetTransactionId(), plan_->table_oid_);
   try {
     if (!lock_manager->LockTable(txn, LockManager::LockMode::INTENTION_EXCLUSIVE, plan_->table_oid_)) {
       throw ExecutionException("delete lock table");
@@ -34,6 +34,7 @@ void DeleteExecutor::Init() {
   } catch (TransactionAbortException &e) {
     throw ExecutionException("delete lock table");
   }
+  printf("%d init delete get %d\n", txn->GetTransactionId(), plan_->table_oid_);
   child_executor_->Init();
 }
 
@@ -56,7 +57,6 @@ auto DeleteExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
       throw ExecutionException("delete lock row");
     }
     if (table_info->table_->MarkDelete(delete_rid, exec_ctx_->GetTransaction())) {
-      txn->AppendTableWriteRecord(TableWriteRecord(delete_rid, WType::DELETE, delete_tuple, table_info->table_.get()));
       cnt++;
       auto vec = exec_ctx_->GetCatalog()->GetTableIndexes(table_info->name_);
       for (auto info : vec) {
@@ -65,6 +65,9 @@ auto DeleteExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
         txn->AppendIndexWriteRecord(IndexWriteRecord(delete_rid, plan_->table_oid_, WType::DELETE, delete_tuple,
                                                      info->index_oid_, exec_ctx_->GetCatalog()));
       }
+      printf("txn{%d} delete rid{%u}\n", txn->GetTransactionId(), delete_rid.GetSlotNum());
+      // txn->AppendTableWriteRecord(TableWriteRecord(delete_rid, WType::DELETE, delete_tuple,
+      // table_info->table_.get()));
     } else {
       break;
     }

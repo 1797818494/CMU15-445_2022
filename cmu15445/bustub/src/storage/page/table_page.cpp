@@ -60,6 +60,7 @@ auto TablePage::InsertTuple(const Tuple &tuple, RID *rid, Transaction *txn, Lock
 
   // Otherwise we claim available free space..
   SetFreeSpacePointer(GetFreeSpacePointer() - tuple.size_);
+  // LOG_INFO("txn{%d} insert freepoint{%u}", txn->GetTransactionId(), GetFreeSpacePointer());
   memcpy(GetData() + GetFreeSpacePointer(), tuple.data_, tuple.size_);
 
   // Set the tuple.
@@ -242,6 +243,8 @@ void TablePage::ApplyDelete(const RID &rid, Transaction *txn, LogManager *log_ma
   //  }
 
   uint32_t free_space_pointer = GetFreeSpacePointer();
+  LOG_INFO("txn{%d} delete freepoint{%u}, tuple_offset{%d}", txn->GetTransactionId(), GetFreeSpacePointer(),
+           tuple_offset);
   BUSTUB_ASSERT(tuple_offset >= free_space_pointer, "Free space appears before tuples.");
 
   memmove(GetData() + free_space_pointer + tuple_size, GetData() + free_space_pointer,

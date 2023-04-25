@@ -26,7 +26,7 @@ InsertExecutor::InsertExecutor(ExecutorContext *exec_ctx, const InsertPlanNode *
 void InsertExecutor::Init() {
   auto lock_manager = exec_ctx_->GetLockManager();
   auto txn = exec_ctx_->GetTransaction();
-  printf("%d init insert %d", txn->GetTransactionId(), plan_->table_oid_);
+  printf("%d init insert %d\n", txn->GetTransactionId(), plan_->table_oid_);
   try {
     if (!lock_manager->LockTable(txn, LockManager::LockMode::INTENTION_EXCLUSIVE, plan_->table_oid_)) {
       throw ExecutionException("insert lock table");
@@ -34,6 +34,7 @@ void InsertExecutor::Init() {
   } catch (TransactionAbortException &e) {
     throw ExecutionException("insert lock table");
   }
+  printf("%d init insert get %d\n", txn->GetTransactionId(), plan_->table_oid_);
   child_executor_->Init();
 }
 
@@ -48,14 +49,16 @@ auto InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
   auto txn = exec_ctx_->GetTransaction();
   while (child_executor_->Next(&insert_tuple, &insert_rid)) {
     TableInfo *table_info = exec_ctx_->GetCatalog()->GetTable(plan_->TableOid());
-    if (table_info->table_->InsertTuple(insert_tuple, &insert_rid, exec_ctx_->GetTransaction())) {
-      try {
-        if (!lock_manager->LockRow(txn, LockManager::LockMode::EXCLUSIVE, plan_->table_oid_, insert_rid)) {
-          throw ExecutionException("insert lock row");
-        }
-      } catch (TransactionAbortException &e) {
+    try {
+      if (!lock_manager->LockRow(txn, LockManager::LockMode::EXCLUSIVE, plan_->table_oid_, insert_rid)) {
         throw ExecutionException("insert lock row");
       }
+    } catch (TransactionAbortException &e) {
+      throw ExecutionException("insert lock row");
+    }
+    if (table_info->table_->InsertTuple(insert_tuple, &insert_rid, exec_ctx_->GetTransaction())) {
+      // printf("txn{%d} insert rid{%u} page{%d}\n", txn->GetTransactionId(), insert_rid.GetSlotNum(),
+      // insert_rid.GetPageId());
       cnt++;
       auto vec = exec_ctx_->GetCatalog()->GetTableIndexes(table_info->name_);
       for (auto info : vec) {

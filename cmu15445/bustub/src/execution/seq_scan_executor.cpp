@@ -21,11 +21,12 @@ SeqScanExecutor::SeqScanExecutor(ExecutorContext *exec_ctx, const SeqScanPlanNod
       iter_end_(exec_ctx_->GetCatalog()->GetTable(plan_->table_name_)->table_->End()) {}
 
 void SeqScanExecutor::Init() {
-  LOG_INFO("init %u", plan_->GetTableOid());
   auto lock_manager = exec_ctx_->GetLockManager();
   auto txn = exec_ctx_->GetTransaction();
+  LOG_INFO("txn{%d} init %u", txn->GetTransactionId(), plan_->GetTableOid());
   try {
-    if (txn->GetIsolationLevel() != IsolationLevel::READ_UNCOMMITTED &&
+    if (!txn->IsTableIntentionExclusiveLocked(plan_->GetTableOid()) &&
+        txn->GetIsolationLevel() != IsolationLevel::READ_UNCOMMITTED &&
         !lock_manager->LockTable(exec_ctx_->GetTransaction(), LockManager::LockMode::INTENTION_SHARED,
                                  plan_->GetTableOid())) {
       throw ExecutionException("Lock shared table fail");
@@ -56,14 +57,16 @@ auto SeqScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
     return false;
   }
   try {
-    if (txn->GetIsolationLevel() != IsolationLevel::READ_UNCOMMITTED) {
+    if (!txn->IsRowExclusiveLocked(plan_->GetTableOid(), iter_begin_->GetRid()) &&
+        txn->GetIsolationLevel() != IsolationLevel::READ_UNCOMMITTED) {
       if (!lock_manager->LockRow(txn, LockManager::LockMode::SHARED, plan_->table_oid_, iter_begin_->GetRid())) {
         throw ExecutionException("lock row shared fail");
       }
     }
     *tuple = *iter_begin_;
     *rid = tuple->GetRid();
-    if (txn->GetIsolationLevel() == IsolationLevel::READ_COMMITTED && !txn->GetSharedLockSet()->empty()) {
+    if (txn->IsRowSharedLocked(plan_->GetTableOid(), iter_begin_->GetRid()) &&
+        txn->GetIsolationLevel() == IsolationLevel::READ_COMMITTED) {
       if (!lock_manager->UnlockRow(txn, plan_->table_oid_, iter_begin_->GetRid())) {
         throw ExecutionException("unlock row shared fail");
       }
