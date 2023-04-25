@@ -22,7 +22,21 @@ IndexScanExecutor::IndexScanExecutor(ExecutorContext *exec_ctx, const IndexScanP
   // *>(exec_ctx_->GetCatalog()->GetIndex(plan_->index_oid_)->index_.get());
 }
 
-void IndexScanExecutor::Init() {}
+void IndexScanExecutor::Init() {
+  auto lock_manager = exec_ctx_->GetLockManager();
+  auto txn = exec_ctx_->GetTransaction();
+  LOG_INFO("txn{%d} init %u", txn->GetTransactionId(), plan_->index_oid_);
+  try {
+    if (!txn->IsTableIntentionExclusiveLocked(plan_->index_oid_) &&
+        txn->GetIsolationLevel() != IsolationLevel::READ_UNCOMMITTED &&
+        !lock_manager->LockTable(exec_ctx_->GetTransaction(), LockManager::LockMode::INTENTION_SHARED,
+                                 plan_->GetTableOid())) {
+      throw ExecutionException("Lock sha table fail");
+    }
+  } catch (TransactionAbortException &e) {
+    throw ExecutionException("execute SEQ LOCK TABLA");
+  }
+}
 
 auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
   if (begin_ != end_) {

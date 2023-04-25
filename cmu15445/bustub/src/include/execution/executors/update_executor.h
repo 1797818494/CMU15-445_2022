@@ -64,5 +64,7 @@ class UpdateExecutor : public AbstractExecutor {
   const TableInfo *table_info_;
   /** The child executor to obtain value from */
   std::unique_ptr<AbstractExecutor> child_executor_;
+  // my add
+  bool has_no_tuple_;
 };
 }  // namespace bustub
