@@ -56,6 +56,32 @@ auto SeqScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
     }
     return false;
   }
+  bool is_predicate = true;
+  while (iter_begin_ != iter_end_) {
+    if (plan_->filter_predicate_ != nullptr) {
+      is_predicate = plan_->filter_predicate_->Evaluate(&(*iter_begin_), plan_->OutputSchema())
+                         .CastAs(TypeId::BOOLEAN)
+                         .GetAs<bool>();
+    }
+    if (is_predicate) {
+      break;
+    }
+    iter_begin_++;
+  }
+  if (iter_begin_ == iter_end_) {
+    if (txn->IsTableIntentionSharedLocked(plan_->table_oid_)) {
+      try {
+        if (txn->GetIsolationLevel() == IsolationLevel::READ_COMMITTED && !txn->GetSharedLockSet()->empty()) {
+          if (!lock_manager->UnlockTable(txn, plan_->table_oid_)) {
+            throw ExecutionException("unlock row shared fail");
+          }
+        }
+      } catch (TransactionAbortException &e) {
+        throw ExecutionException("execute SEQ lockandunlock TABLA");
+      }
+    }
+    return false;
+  }
   try {
     if (!txn->IsRowExclusiveLocked(plan_->GetTableOid(), iter_begin_->GetRid()) &&
         txn->GetIsolationLevel() != IsolationLevel::READ_UNCOMMITTED) {
@@ -65,10 +91,21 @@ auto SeqScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
     }
     *tuple = *iter_begin_;
     *rid = tuple->GetRid();
-    if (txn->IsRowSharedLocked(plan_->GetTableOid(), iter_begin_->GetRid()) &&
-        txn->GetIsolationLevel() == IsolationLevel::READ_COMMITTED) {
-      if (!lock_manager->UnlockRow(txn, plan_->table_oid_, iter_begin_->GetRid())) {
-        throw ExecutionException("unlock row shared fail");
+    if (plan_->filter_predicate_ != nullptr) {
+      is_predicate = plan_->filter_predicate_->Evaluate(&(*iter_begin_), plan_->OutputSchema())
+                         .CastAs(TypeId::BOOLEAN)
+                         .GetAs<bool>();
+    }
+    if (txn->IsRowSharedLocked(plan_->GetTableOid(), *rid)) {
+      if (txn->GetIsolationLevel() == IsolationLevel::READ_COMMITTED) {
+        if (!lock_manager->UnlockRow(txn, plan_->table_oid_, *rid)) {
+          throw ExecutionException("unlock row shared fail");
+        }
+      }
+      if (txn->GetIsolationLevel() == IsolationLevel::REPEATABLE_READ && !is_predicate) {
+        if (!lock_manager->UnlockRow(txn, plan_->table_oid_, *rid)) {
+          throw ExecutionException("unlock row unrepeated fail");
+        }
       }
     }
   } catch (TransactionAbortException &e) {

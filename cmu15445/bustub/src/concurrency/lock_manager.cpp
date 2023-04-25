@@ -386,8 +386,8 @@ auto Compatible(const std::set<LockManager::LockMode> &granted_set, const LockMa
 }
 void LockManager::AddEdge(txn_id_t t1, txn_id_t t2) {
   // std::unique_lock<std::mutex> lock(waits_for_latch_);
-  std::cout << "add"
-            << " " << t1 << "   " << t2 << std::endl;
+  // std::cout << "add"
+  //           << " " << t1 << "   " << t2 << std::endl;
   waits_for_[t1].insert(t2);
 }
 

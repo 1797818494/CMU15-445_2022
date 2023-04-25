@@ -9,7 +9,7 @@
 #include "optimizer/optimizer.h"
 
 namespace bustub {
-
+#define BUSTUB_OPTIMIZER_HACK_REMOVE_AFTER_2022_FALL
 #ifdef BUSTUB_OPTIMIZER_HACK_REMOVE_AFTER_2022_FALL
 
 auto Optimizer::OptimizeMergeFilterScan(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef {

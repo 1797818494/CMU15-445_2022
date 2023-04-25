@@ -302,6 +302,7 @@ auto TablePage::GetTuple(const RID &rid, Tuple *tuple, Transaction *txn, LockMan
     if (enable_logging) {
       txn->SetState(TransactionState::ABORTED);
     }
+    LOG_INFO("txn{%d} is delete", txn->GetTransactionId());
     return false;
   }
 
