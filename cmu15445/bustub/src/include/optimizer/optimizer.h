@@ -7,9 +7,14 @@
 #include <utility>
 #include <vector>
 
+#include "execution/plans/filter_plan.h"
+#include "execution/plans/index_scan_plan.h"
+#include "execution/plans/seq_scan_plan.h"
+
 #include "catalog/catalog.h"
 #include "concurrency/transaction.h"
 #include "execution/expressions/abstract_expression.h"
+#include "execution/expressions/comparison_expression.h"
 #include "execution/plans/abstract_plan.h"
 
 #define BUSTUB_OPTIMIZER_HACK_REMOVE_AFTER_2022_FALL

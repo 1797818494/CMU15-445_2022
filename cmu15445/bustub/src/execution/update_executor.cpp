@@ -27,7 +27,7 @@ UpdateExecutor::UpdateExecutor(ExecutorContext *exec_ctx, const UpdatePlanNode *
 void UpdateExecutor::Init() {
   auto lock_manager = exec_ctx_->GetLockManager();
   auto txn = exec_ctx_->GetTransaction();
-  printf("%d update %d  \n", txn->GetTransactionId(), plan_->table_oid_);
+  // printf("%d update %d  \n", txn->GetTransactionId(), plan_->table_oid_);
   try {
     if (!lock_manager->LockTable(txn, LockManager::LockMode::INTENTION_EXCLUSIVE, plan_->table_oid_)) {
       throw ExecutionException("delete lock table");
@@ -35,7 +35,7 @@ void UpdateExecutor::Init() {
   } catch (TransactionAbortException &e) {
     throw ExecutionException("delete lock table");
   }
-  printf("%d update get %d\n", txn->GetTransactionId(), plan_->table_oid_);
+  // printf("%d update get %d\n", txn->GetTransactionId(), plan_->table_oid_);
   child_executor_->Init();
 }
 
@@ -60,19 +60,23 @@ auto UpdateExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
     Tuple old_tuple;
     if (!table_info->table_->GetTuple(update_rid, &old_tuple, txn)) {
       LOG_ERROR("can't get old tuple");
+      exit(-1);
     }
     if (table_info->table_->UpdateTuple(update_tuple, update_rid, exec_ctx_->GetTransaction())) {
       cnt++;
       auto vec = exec_ctx_->GetCatalog()->GetTableIndexes(table_info->name_);
       for (auto info : vec) {
-        auto key = update_tuple.KeyFromTuple(table_info->schema_, info->key_schema_, info->index_->GetKeyAttrs());
-        info->index_->DeleteEntry(key, update_rid, exec_ctx_->GetTransaction());
+        auto old_key = old_tuple.KeyFromTuple(table_info->schema_, info->key_schema_, info->index_->GetKeyAttrs());
+        info->index_->DeleteEntry(old_key, update_rid, exec_ctx_->GetTransaction());
+        auto update_key =
+            update_tuple.KeyFromTuple(table_info->schema_, info->key_schema_, info->index_->GetKeyAttrs());
+        info->index_->InsertEntry(update_key, update_rid, exec_ctx_->GetTransaction());
         auto update_index_record = IndexWriteRecord(update_rid, plan_->table_oid_, WType::UPDATE, update_tuple,
                                                     info->index_oid_, exec_ctx_->GetCatalog());
         update_index_record.old_tuple_ = old_tuple;
         txn->AppendIndexWriteRecord(update_index_record);
       }
-      printf("txn{%d} update rid{%u}\n", txn->GetTransactionId(), update_rid.GetSlotNum());
+      // printf("txn{%d} update rid{%u}\n", txn->GetTransactionId(), update_rid.GetSlotNum());
     } else {
       break;
     }

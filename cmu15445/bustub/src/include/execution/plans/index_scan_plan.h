@@ -44,6 +44,8 @@ class IndexScanPlanNode : public AbstractPlanNode {
   index_oid_t index_oid_;
 
   // Add anything you want here for index lookup
+  Value val_;
+  std::string table_name_;
 
  protected:
   auto PlanNodeToString() const -> std::string override {

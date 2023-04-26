@@ -46,8 +46,11 @@ class IndexScanExecutor : public AbstractExecutor {
   /** The index scan plan node to be executed. */
   const IndexScanPlanNode *plan_;
   // my add
-  BPlusTreeIndexForOneIntegerColumn *tree_;
-  IndexIterator<IntegerKeyType, IntegerValueType, IntegerComparatorType> begin_;
-  IndexIterator<IntegerKeyType, IntegerValueType, IntegerComparatorType> end_;
+  std::vector<RID>::iterator iter_begin_;
+  std::vector<RID>::iterator iter_end_;
+  std::vector<RID> result_;
+  // BPlusTreeIndexForOneIntegerColumn *tree_;
+  // IndexIterator<IntegerKeyType, IntegerValueType, IntegerComparatorType> begin_;
+  // IndexIterator<IntegerKeyType, IntegerValueType, IntegerComparatorType> end_;
 };
 }  // namespace bustub

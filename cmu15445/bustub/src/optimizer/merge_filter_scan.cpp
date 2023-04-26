@@ -27,6 +27,7 @@ auto Optimizer::OptimizeMergeFilterScan(const AbstractPlanNodeRef &plan) -> Abst
     if (child_plan.GetType() == PlanType::SeqScan) {
       const auto &seq_scan_plan = dynamic_cast<const SeqScanPlanNode &>(child_plan);
       if (seq_scan_plan.filter_predicate_ == nullptr) {
+        LOG_INFO("get filterscan");
         return std::make_shared<SeqScanPlanNode>(filter_plan.output_schema_, seq_scan_plan.table_oid_,
                                                  seq_scan_plan.table_name_, filter_plan.GetPredicate());
       }

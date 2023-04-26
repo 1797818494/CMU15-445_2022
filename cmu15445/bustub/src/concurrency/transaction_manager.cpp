@@ -44,7 +44,7 @@ auto TransactionManager::Begin(Transaction *txn, IsolationLevel isolation_level)
 }
 
 void TransactionManager::Commit(Transaction *txn) {
-  LOG_INFO("txn{%d} commit", txn->GetTransactionId());
+  // LOG_INFO("txn{%d} commit", txn->GetTransactionId());
   txn->SetState(TransactionState::COMMITTED);
 
   // Perform all deletes before we commit.
@@ -70,7 +70,7 @@ void TransactionManager::Commit(Transaction *txn) {
 
 void TransactionManager::Abort(Transaction *txn) {
   txn->SetState(TransactionState::ABORTED);
-  LOG_INFO("txn{%d} abort", txn->GetTransactionId());
+  // LOG_INFO("txn{%d} abort", txn->GetTransactionId());
   // Rollback before releasing the lock.
   auto table_write_set = txn->GetWriteSet();
   while (!table_write_set->empty()) {
@@ -80,7 +80,7 @@ void TransactionManager::Abort(Transaction *txn) {
       table->RollbackDelete(item.rid_, txn);
     } else if (item.wtype_ == WType::INSERT) {
       // Note that this also releases the lock when holding the page latch.
-      LOG_INFO("apply delete");
+      // LOG_INFO("apply delete");
       table->ApplyDelete(item.rid_, txn);
     } else if (item.wtype_ == WType::UPDATE) {
       table->UpdateTuple(item.tuple_, item.rid_, txn);

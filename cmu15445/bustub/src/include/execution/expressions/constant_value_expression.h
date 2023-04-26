@@ -17,7 +17,6 @@
 #include <vector>
 
 #include "execution/expressions/abstract_expression.h"
-
 namespace bustub {
 /**
  * ConstantValueExpression represents constants.
